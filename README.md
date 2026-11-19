@@ -56,12 +56,6 @@ All displayed timestamps and exports follow the **Time zone** selected in Settin
 - `mentions.db` — SQLite records
 - `hashtags.json`, `keywords.json` — configured terms
 
-## Check
-
-```text
-python test_monitor.py
-```
-
 The service has no built-in authentication. Restrict access with Tailscale
 ACLs.
 
