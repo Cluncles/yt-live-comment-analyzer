@@ -552,6 +552,10 @@
             <label for="key">API key (optional)</label>
             <input id="key" type="password" placeholder="AIza…" autocomplete="off" spellcheck="false">
           </div>
+          <div class="field stream">
+            <label for="timeZone">Time zone</label>
+            <select id="timeZone"></select>
+          </div>
           <div class="buttons">
             <button class="primary" id="start">Start monitoring</button>
             <button id="stop">Stop</button>
@@ -602,8 +606,8 @@
           <div><span>Video ID</span><span id="kvVideo">—</span></div>
         </div>
         <div class="links">
-          <a href="/api/export.csv" download>Export CSV</a>
-          <a href="/api/export.jsonl" download>Export JSONL</a>
+          <a href="/api/export.csv" id="exportCsv" download>Export CSV</a>
+          <a href="/api/export.jsonl" id="exportJsonl" download>Export JSONL</a>
           <a href="/api/state">State JSON</a>
         </div>
         <div class="section-head subtle"><h2>Records</h2><small id="settingsCount">0 records</small></div>
@@ -625,6 +629,7 @@
   const state = {
     history: [], chat: [], hashtags: [], keywords: [], filter: null,
     aggregates: null, chatQuery: "", chatPaused: false, chatNewId: null,
+    latestTs: null,
   };
   const filteredHistory = () => state.filter
     ? state.history.filter((m) => (m.variant || "").toLowerCase() === state.filter)
@@ -905,14 +910,108 @@
   setKeywords([]);
   renderStats();
 
-  const phTime = new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Asia/Manila", hour: "2-digit", minute: "2-digit",
-    second: "2-digit", hour12: false, hourCycle: "h23",
+  const zoneSelect = $("timeZone");
+  const fallbackZones = [
+    "Asia/Manila", "UTC", "Asia/Tokyo", "Asia/Singapore", "Asia/Hong_Kong",
+    "Asia/Kolkata", "Asia/Dubai", "Australia/Sydney", "Pacific/Auckland",
+    "Europe/London", "Europe/Paris", "Europe/Berlin", "America/New_York",
+    "America/Chicago", "America/Denver", "America/Los_Angeles",
+    "America/Sao_Paulo", "Africa/Cairo", "Africa/Lagos",
+  ];
+  let zoneList = fallbackZones;
+  try {
+    const supported = Intl.supportedValuesOf("timeZone");
+    if (supported && supported.length) zoneList = supported;
+  } catch (e) {}
+  if (!zoneList.includes("UTC")) zoneList = ["UTC", ...zoneList];
+  zoneList.forEach((zone) => {
+    const option = document.createElement("option");
+    option.value = zone;
+    option.textContent = zone.replace(/_/g, " ");
+    zoneSelect.appendChild(option);
   });
+  let activeZone = "Asia/Manila";
+  try { activeZone = localStorage.getItem("palawan_timezone") || activeZone; } catch (e) {}
+  if (!zoneList.includes(activeZone)) activeZone = "Asia/Manila";
+  zoneSelect.value = activeZone;
+  let timeFormatter;
+  function rebuildTimeFormatter() {
+    timeFormatter = new Intl.DateTimeFormat("en-GB", {
+      timeZone: activeZone, hour: "2-digit", minute: "2-digit", second: "2-digit",
+      hour12: false, hourCycle: "h23", timeZoneName: "short",
+    });
+  }
+  rebuildTimeFormatter();
   const escapeTime = (ts) => {
     const d = new Date(ts);
-    return Number.isNaN(d.getTime()) ? "—" : phTime.format(d) + " PHT";
+    if (Number.isNaN(d.getTime())) return "—";
+    const parts = timeFormatter.formatToParts(d);
+    const clock = parts.filter((part) =>
+      part.type === "hour" || part.type === "minute" || part.type === "second"
+    ).map((part) => part.value).join(":");
+    const zone = parts.find((part) => part.type === "timeZoneName");
+    return clock + (zone ? " " + zone.value : "");
   };
+  function zoneParts(d) {
+    const parts = new Intl.DateTimeFormat("en-GB", {
+      timeZone: activeZone, year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit",
+      hour12: false, hourCycle: "h23",
+    }).formatToParts(d);
+    const out = {};
+    parts.forEach((part) => { out[part.type] = part.value; });
+    return out;
+  }
+  function isoInZone(ts) {
+    const d = new Date(ts);
+    if (Number.isNaN(d.getTime())) return ts;
+    const p = zoneParts(d);
+    const hour = String(Number(p.hour) % 24).padStart(2, "0");
+    const asUTC = Date.UTC(
+      Number(p.year), Number(p.month) - 1, Number(p.day),
+      Number(hour), Number(p.minute), Number(p.second)
+    );
+    const offset = Math.round((asUTC - d.getTime()) / 60000);
+    const sign = offset >= 0 ? "+" : "-";
+    const abs = Math.abs(offset);
+    return p.year + "-" + p.month + "-" + p.day + "T" + hour + ":" +
+      p.minute + ":" + p.second + sign +
+      String(Math.floor(abs / 60)).padStart(2, "0") + ":" +
+      String(abs % 60).padStart(2, "0");
+  }
+  function downloadText(text, name, type) {
+    const blob = new Blob([text], { type });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = name;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+  }
+  zoneSelect.addEventListener("change", () => {
+    activeZone = zoneSelect.value;
+    rebuildTimeFormatter();
+    try { localStorage.setItem("palawan_timezone", activeZone); } catch (e) {}
+    renderLedger();
+    renderChat();
+    renderRecordList();
+    if (state.latestTs) $("latest").textContent = escapeTime(state.latestTs).slice(0, 8);
+  });
+  $("exportCsv").addEventListener("click", async (e) => {
+    e.preventDefault();
+    const text = await (await fetch("/api/export.csv")).text();
+    downloadText(text.replace(
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}/gm,
+      (ts) => isoInZone(ts)
+    ), "mentions.csv", "text/csv;charset=utf-8");
+  });
+  $("exportJsonl").addEventListener("click", async (e) => {
+    e.preventDefault();
+    const text = await (await fetch("/api/export.jsonl")).text();
+    downloadText(text.replace(
+      /"ts":\s*"([^"]+)"/g,
+      (full, ts) => '"ts": "' + isoInZone(ts) + '"'
+    ), "mentions.jsonl", "application/x-ndjson;charset=utf-8");
+  });
   function renderChat() {
     const box = $("chatList");
     const entering = state.chatNewId;
@@ -1009,7 +1108,10 @@
   function updateStats(data) {
     if (typeof data.mentions === "number") $("mentions").textContent = data.mentions;
     if (typeof data.users === "number") $("users").textContent = data.users;
-    if (data.latest) $("latest").textContent = escapeTime(data.latest).slice(0, 8);
+    if (data.latest) {
+      state.latestTs = data.latest;
+      $("latest").textContent = escapeTime(data.latest).slice(0, 8);
+    }
     if (data.aggregates) {
       state.aggregates = data.aggregates;
       renderStats();

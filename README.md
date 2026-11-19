@@ -36,7 +36,7 @@ matched terms are highlighted inline. The **Statistics** tab groups mentions
 by username and term. **Erase
 all** clears records and stops monitoring.
 
-All timestamps are Philippine Time, UTC+8.
+All displayed timestamps and exports follow the **Time zone** selected in Settings. Default: Asia/Manila.
 
 ## API
 
