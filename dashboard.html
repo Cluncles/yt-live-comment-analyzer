@@ -606,7 +606,6 @@
           <div><span>Video ID</span><span id="kvVideo">—</span></div>
         </div>
         <div class="links">
-          <a href="/api/export.csv" id="exportCsv" download>Export CSV</a>
           <a href="/api/export.jsonl" id="exportJsonl" download>Export JSONL</a>
           <a href="/api/state">State JSON</a>
         </div>
@@ -995,14 +994,6 @@
     renderChat();
     renderRecordList();
     if (state.latestTs) $("latest").textContent = escapeTime(state.latestTs).slice(0, 8);
-  });
-  $("exportCsv").addEventListener("click", async (e) => {
-    e.preventDefault();
-    const text = await (await fetch("/api/export.csv")).text();
-    downloadText(text.replace(
-      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}/gm,
-      (ts) => isoInZone(ts)
-    ), "mentions.csv", "text/csv;charset=utf-8");
   });
   $("exportJsonl").addEventListener("click", async (e) => {
     e.preventDefault();

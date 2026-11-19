@@ -2,8 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import csv
-import io
 from collections import deque
 import json
 import queue
@@ -133,17 +131,6 @@ class Store:
                 for data in sorted(terms.values(), key=lambda data: -len(data["users"]))
             ],
         }
-
-    def csv(self) -> str:
-        buf = io.StringIO()
-        writer = csv.writer(buf)
-        writer.writerow(["time", "username", "hashtag", "message", "video_id", "source"])
-        for row in self.all(100000):
-            writer.writerow([
-                row["ts"], row["user"], row["variant"], row["message"],
-                row["video_id"] or "", row["source"] or "",
-            ])
-        return buf.getvalue()
 
     def jsonl(self) -> str:
         return "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in self.all(100000))
@@ -706,9 +693,6 @@ class Handler(BaseHTTPRequestHandler):
             self.json_response({"keywords": APP.keywords.list()})
         elif path == "/api/events":
             self.stream_events()
-        elif path == "/api/export.csv":
-            self.respond(200, APP.store.csv().encode("utf-8-sig"),
-                         "text/csv; charset=utf-8")
         elif path == "/api/export.jsonl":
             self.respond(200, APP.store.jsonl().encode("utf-8"),
                          "application/x-ndjson; charset=utf-8")

@@ -50,7 +50,6 @@ All displayed timestamps and exports follow the **Time zone** selected in Settin
 | POST | `/api/stop` | Stop monitoring |
 | DELETE | `/api/mentions/<id>` | Delete one record |
 | DELETE | `/api/mentions` | Erase all records |
-| GET | `/api/export.csv` | CSV export |
 
 ## Data
 
