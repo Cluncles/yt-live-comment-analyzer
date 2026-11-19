@@ -1,0 +1,1264 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YT Live Comment Analyzer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --canvas: #0f0f0f;
+    --surface: #212121;
+    --chip: #272727;
+    --chip-hover: #3f3f3f;
+    --border: #303030;
+    --text: #f1f1f1;
+    --text-strong: #ffffff;
+    --muted: #aaaaaa;
+    --disabled: #717171;
+    --brand: #ff0000;
+    --live: #cc0000;
+    --link: #3ea6ff;
+    --black: #000000;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--canvas); color: var(--text); }
+  body {
+    font-family: Roboto, Arial, sans-serif;
+    font-size: 14px;
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+  }
+  .mono { font-family: "Roboto Mono", Consolas, monospace; font-variant-numeric: tabular-nums; }
+  .masthead {
+    position: sticky; top: 0; z-index: 10; height: 56px;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 16px; padding: 0 24px;
+    background: var(--canvas); border-bottom: 1px solid var(--border);
+  }
+  .wordmark { font-size: 16px; font-weight: 500; color: var(--text-strong); white-space: nowrap; }
+  .wordmark span { color: var(--brand); }
+  .status-group { display: flex; align-items: center; gap: 16px; min-width: 0; }
+  .status {
+    display: flex; align-items: center; gap: 8px; min-width: 0;
+    font-size: 12px; letter-spacing: .08em; text-transform: uppercase;
+    font-weight: 500; color: var(--muted);
+  }
+  .status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--disabled); flex: none; }
+  .status[data-state="live"] { color: var(--text-strong); }
+  .status[data-state="live"] .dot { background: var(--brand); animation: pulse 1.8s infinite; }
+  .status[data-state="error"] .dot { background: var(--live); }
+  .status[data-state="connecting"] .dot,
+  .status[data-state="reconnecting"] .dot { background: var(--brand); animation: pulse 1.2s infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
+  .settings-btn { display: inline-flex; align-items: center; gap: 8px; min-height: 36px; }
+  .settings-btn svg { width: 16px; height: 16px; flex: none; }
+
+  .tabbar {
+    position: sticky; top: 56px; z-index: 9;
+    background: var(--canvas); border-bottom: 1px solid var(--border);
+  }
+  .tabbar-inner { max-width: 1280px; margin: 0 auto; padding: 0 24px; display: flex; gap: 24px; }
+  .tab {
+    height: 48px; min-height: 48px; padding: 0 2px; border: 0; border-radius: 0;
+    background: transparent; color: var(--muted); font-weight: 500;
+    border-bottom: 2px solid transparent;
+  }
+  .tab:hover { background: transparent; color: var(--text); }
+  .tab.active { color: var(--text-strong); border-bottom-color: var(--brand); }
+  #chatView .section-head { border-bottom: 0; }
+  .chat-tools { display: flex; align-items: center; gap: 12px; }
+  .chat-tools input { flex: 1 1 160px; width: auto; }
+  .live-toggle { height: 32px; min-height: 32px; padding: 0 12px; border-radius: 18px; font-size: 12px; color: var(--muted); background: transparent; border: 1px solid var(--border); }
+  .live-toggle[data-state="live"] { color: var(--brand); border-color: var(--brand); }
+  .chat-list { display: grid; gap: 4px; max-height: min(60vh, 620px); overflow-y: auto; padding-right: 8px; }
+  .chat-item { display: grid; grid-template-columns: 160px 1fr auto; gap: 16px; align-items: start; padding: 10px 0; border-bottom: 1px solid var(--border); }
+  @keyframes chat-pop { from { opacity: 0; transform: translateY(10px) scale(.98); } to { opacity: 1; transform: none; } }
+  .chat-item.chat-enter { animation: chat-pop .28s ease-out; }
+  @media (prefers-reduced-motion: reduce) { .chat-item.chat-enter { animation: none; } }
+  .chat-item .who { color: var(--text-strong); font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
+  .chat-item .msg { color: var(--text); font-size: 14px; overflow-wrap: anywhere; }
+  .chat-item .time { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .chat-empty { color: var(--muted); font-size: 14px; padding: 32px 0; }
+  @media (max-width: 560px) {
+    .chat-item { grid-template-columns: 1fr auto; gap: 4px 12px; }
+    .chat-item .who { grid-column: 1 / -1; }
+    .chat-tools { flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+    .chat-tools input { flex-basis: 100%; }
+  }
+  .tab:focus-visible { outline: 2px solid var(--link); outline-offset: -2px; }
+  .shell { max-width: 1280px; margin: 0 auto; padding: 0 24px 72px; }
+  .intro { padding: 32px 0 24px; border-bottom: 1px solid var(--border); }
+  .eyebrow {
+    font-size: 12px; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--muted); font-weight: 500; margin: 0 0 8px;
+  }
+  .sub { color: var(--muted); font-size: 14px; margin: 0; }
+  .chip-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+  .chip {
+    display: inline-flex; align-items: center; min-height: 32px; padding: 0 14px;
+    background: var(--chip); color: var(--text); border: 1px solid var(--border);
+    border-radius: 18px; font-size: 14px; font-weight: 500;
+  }
+  .chip.keyword { border-color: var(--link); color: var(--link); }
+
+  .now-monitoring { padding: 16px 0; border-bottom: 1px solid var(--border); }
+  .now-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  .now-head .label {
+    font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted);
+  }
+  .link-status {
+    display: flex; align-items: center; gap: 8px; flex: none;
+    font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted);
+  }
+  .link-status::before {
+    content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--disabled);
+  }
+  .link-status[data-state="active"] { color: var(--text-strong); }
+  .link-status[data-state="active"]::before { background: var(--brand); animation: pulse 1.8s infinite; }
+  .now-body { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; margin-top: 8px; }
+  #videoLink {
+    color: var(--link); font-size: 16px; font-weight: 500;
+    text-decoration: none; overflow-wrap: anywhere;
+  }
+  #videoLink:hover { text-decoration: underline; }
+  .now-channel { color: var(--muted); font-size: 12px; }
+
+  .stats-intro { padding: 24px 0; border-bottom: 1px solid var(--border); }
+  .stat-figures {
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+    padding: 24px 0; border-bottom: 1px solid var(--border);
+  }
+  .stat-head, .stat-row {
+    display: grid; grid-template-columns: minmax(0, 1fr) 88px 88px 88px;
+    gap: 16px; align-items: center;
+  }
+  .stat-head {
+    padding: 12px 0; border-bottom: 1px solid var(--border);
+    font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted);
+  }
+  .stat-row { padding: 12px 0; border-bottom: 1px solid var(--border); }
+  .stat-row .who {
+    font-size: 14px; font-weight: 500; color: var(--text-strong);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .stat-row .num { font-size: 14px; color: var(--text); }
+  .stat-row .num.total { color: var(--link); font-weight: 500; }
+  .stat-row .terms { grid-column: 1 / -1; color: var(--muted); font-size: 12px; margin-top: -4px; }
+  .stat-empty { color: var(--muted); font-size: 14px; padding: 32px 0; }
+  .stats-body { padding-top: 32px; }
+  .term-cards {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 16px; margin-top: 16px;
+  }
+  .term-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 16px;
+  }
+  .term-card .term-label {
+    font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted);
+  }
+  .term-card .term-name {
+    font-size: 16px; font-weight: 500; color: var(--link);
+    margin-top: 8px; overflow-wrap: anywhere;
+  }
+  .term-card[data-kind="keyword"] .term-name { color: var(--text-strong); }
+  .term-card .term-value {
+    font-family: "Roboto Mono", Consolas, monospace;
+    font-size: 28px; color: var(--text-strong); margin-top: 12px;
+  }
+  .term-card .term-sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .table-head { margin-top: 32px; }
+  .figures {
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+    padding: 24px 0; border-bottom: 1px solid var(--border);
+  }
+  .figure { padding: 0 24px; border-left: 1px solid var(--border); min-width: 0; }
+  .figure:first-child { padding-left: 0; border-left: 0; }
+  .figure .label {
+    font-size: 12px; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--muted); font-weight: 500;
+  }
+  .figure .value {
+    font-family: "Roboto Mono", Consolas, monospace;
+    font-size: 24px; margin-top: 8px; line-height: 1.2; color: var(--text-strong);
+  }
+  .figure .value.brand { color: var(--link); }
+  .figure .foot { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .workspace { padding-top: 32px; }
+  .section-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    border-bottom: 1px solid var(--border); padding-bottom: 12px; gap: 16px;
+  }
+  .section-head h2 {
+    margin: 0; font-size: 12px; letter-spacing: .08em; text-transform: uppercase;
+    font-weight: 700; color: var(--text-strong);
+  }
+  .section-head small {
+    color: var(--muted); font-size: 12px; letter-spacing: .04em; text-transform: uppercase;
+  }
+  .erase-all {
+    height: 32px; min-height: 32px; padding: 0 12px; border-radius: 18px;
+    font-size: 12px; color: var(--muted); background: transparent;
+  }
+  .erase-all:hover { color: var(--brand); border-color: var(--brand); }
+  .ledger { min-width: 0; }
+  .entry {
+    display: grid; grid-template-columns: 72px minmax(120px, .7fr) minmax(0, 1.6fr) 96px;
+    gap: 16px; align-items: baseline; padding: 12px 0;
+    border-bottom: 1px solid var(--border); min-width: 0;
+  }
+  .entry .time { color: var(--muted); font-size: 12px; }
+  .entry .user {
+    font-weight: 500; font-size: 14px; color: var(--text-strong);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .entry .msg { color: var(--text); font-size: 14px; overflow-wrap: anywhere; }
+  .entry .msg b { color: var(--link); font-weight: 500; }
+  .entry .tag { color: var(--link); font-size: 12px; text-align: right; }
+  .empty { color: var(--muted); font-size: 14px; padding: 32px 0; }
+
+  .aside-copy { color: var(--muted); font-size: 14px; line-height: 1.6; margin: 0 0 16px; }
+  .kv { border-top: 1px solid var(--border); }
+  .kv div {
+    display: flex; justify-content: space-between; gap: 16px;
+    padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 14px;
+  }
+  .kv span:first-child { color: var(--muted); }
+  .kv span:last-child { color: var(--text); text-align: right; overflow-wrap: anywhere; }
+  .links { display: flex; gap: 20px; margin-top: 16px; flex-wrap: wrap; }
+  .links a { color: var(--link); font-size: 14px; text-decoration: none; border-bottom: 1px solid transparent; }
+  .links a:hover { border-bottom-color: var(--link); }
+  .records-actions { margin: 8px 0; display: flex; align-items: center; gap: 12px; }
+  .record-hint { color: var(--muted); font-size: 12px; }
+  .record-list { max-height: 140px; overflow: auto; border-top: 1px solid var(--border); }
+  .record-row {
+    display: flex; align-items: center; gap: 8px; padding: 8px 0;
+    border-bottom: 1px solid var(--border); font-size: 12px; min-width: 0;
+  }
+  .record-row .who { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .record-row .what { color: var(--link); flex: none; }
+  .record-delete {
+    width: 28px; height: 28px; min-width: 28px; padding: 0; border-radius: 50%;
+    color: var(--disabled); background: transparent; font-size: 18px; line-height: 1;
+  }
+  .record-delete:hover { color: var(--brand); background: var(--chip); }
+  .record-empty { color: var(--muted); font-size: 12px; padding: 12px 0; }
+  .controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: end; }
+  .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .field.stream, .buttons { grid-column: 1 / -1; }
+  label {
+    font-size: 12px; letter-spacing: .04em; text-transform: uppercase;
+    color: var(--muted); font-weight: 500;
+  }
+  input, select {
+    width: 100%; appearance: none; background: transparent; color: var(--text);
+    border: 0; border-bottom: 1px solid var(--border); border-radius: 0;
+    padding: 6px 0; font: inherit; font-size: 14px; outline: none;
+  }
+  input:focus, select:focus { border-bottom-color: var(--link); }
+  input::placeholder { color: var(--disabled); }
+  select option { background: var(--surface); color: var(--text); }
+  .buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+  button {
+    height: 40px; padding: 0 16px; border-radius: 18px; font: inherit;
+    font-weight: 500; font-size: 14px; cursor: pointer; transition: background .15s ease;
+    border: 1px solid var(--border); background: var(--chip); color: var(--text);
+  }
+  button:hover { background: var(--chip-hover); }
+  button:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+  button.primary { background: var(--brand); border-color: var(--brand); color: var(--text-strong); }
+  button.primary:hover { background: var(--live); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .toasts {
+    position: fixed; top: 72px; right: 24px; width: min(360px, calc(100vw - 32px));
+    display: flex; flex-direction: column; gap: 8px; z-index: 20;
+    pointer-events: none;
+  }
+  .toast {
+    background: var(--surface); border: 1px solid var(--border);
+    border-left: 3px solid var(--brand); border-radius: 12px;
+    padding: 16px; animation: arrive .24s ease both;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, .5);
+  }
+  .toast.leaving { animation: leave .3s ease forwards; }
+  .toast .tlabel {
+    font-size: 12px; letter-spacing: .04em; text-transform: uppercase;
+    color: var(--brand); font-weight: 700;
+  }
+  .toast .tuser { font-size: 20px; font-weight: 700; margin-top: 8px; color: var(--text-strong); overflow-wrap: anywhere; }
+  .toast .tmsg { color: var(--text); font-size: 14px; margin-top: 4px; overflow-wrap: anywhere; }
+  .toast .tmeta { color: var(--muted); font-size: 12px; margin-top: 8px; }
+  @keyframes arrive { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
+  @keyframes leave { to { opacity: 0; transform: translateX(24px); } }
+  [hidden] { display: none !important; }
+  .modal-backdrop {
+    position: fixed; inset: 0; z-index: 40; display: grid; place-items: center;
+    padding: 20px; background: rgba(0, 0, 0, .72);
+  }
+  .modal {
+    width: min(880px, 100%); background: var(--surface);
+    border: 1px solid var(--border); border-radius: 12px;
+    padding: 20px; box-shadow: 0 8px 24px rgba(0, 0, 0, .5);
+    animation: modal-in .2s ease both;
+    max-height: calc(100vh - 40px); overflow: auto;
+  }
+  @keyframes modal-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  .modal-head {
+    display: flex; justify-content: space-between; align-items: flex-start;
+    gap: 16px; border-bottom: 1px solid var(--border); padding-bottom: 12px;
+  }
+  .modal-head .eyebrow { margin-bottom: 4px; }
+  .modal-head h2 { margin: 0; font-size: 24px; font-weight: 500; color: var(--text-strong); }
+  .modal-body {
+    display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(230px, .9fr);
+    gap: 24px; margin-top: 16px;
+  }
+  .modal-main, .modal-aside { min-width: 0; }
+  .modal-aside { border-left: 1px solid var(--border); padding-left: 24px; }
+  .modal-aside .section-head { padding-bottom: 12px; }
+  .modal-aside .section-head.subtle { margin-top: 16px; }
+  .modal-aside .keyword-list { max-height: 120px; overflow: auto; }
+  .icon-btn { width: 40px; height: 40px; min-width: 40px; padding: 0; border-radius: 18px; font-size: 24px; line-height: 1; display: grid; place-items: center; }
+  .modal-note { color: var(--muted); font-size: 12px; margin: 12px 0 0; line-height: 1.6; }
+  .toggle-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    border-top: 1px solid var(--border); margin-top: 16px; padding-top: 12px;
+  }
+  .toggle-copy { min-width: 0; }
+  .toggle-title { font-size: 14px; font-weight: 500; color: var(--text-strong); }
+  .toggle-sub { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .switch { position: relative; width: 44px; height: 24px; flex: none; display: block; }
+  .switch input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; z-index: 1; }
+  .switch .track {
+    position: absolute; inset: 0; border-radius: 12px;
+    background: var(--chip-hover); transition: background .15s ease;
+  }
+  .switch .track::after {
+    content: ""; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px;
+    border-radius: 50%; background: var(--muted); transition: transform .15s ease;
+  }
+  .switch input:checked + .track { background: var(--brand); }
+  .switch input:checked + .track::after { transform: translateX(20px); background: var(--text-strong); }
+  .switch input:focus-visible + .track { outline: 2px solid var(--link); outline-offset: 2px; }
+  .hashtag-editor { border-top: 1px solid var(--border); margin-top: 16px; padding-top: 12px; }
+  .hashtag-editor .section-head { margin-bottom: 12px; }
+  .tag-rows { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; max-height: 66px; overflow: auto; }
+  .toggle-row, .hashtag-editor { grid-column: 1 / -1; }
+  .tag-row { display: flex; align-items: center; gap: 8px; }
+  .tag-row input { flex: 1 1 auto; min-width: 0; }
+  .tag-remove { height: 40px; min-width: 40px; padding: 0; font-size: 20px; line-height: 1; color: var(--muted); }
+  .tag-remove:hover { color: var(--text-strong); }
+  .tag-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .tag-actions input { flex: 1 1 150px; width: auto; }
+  .tag-actions button { height: 40px; min-height: 40px; }
+  .tag-hint { display: none; }
+  .keyword-list { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+  .keyword-list span {
+    background: var(--chip); border: 1px solid var(--border); border-radius: 18px;
+    color: var(--link); font-size: 16px; font-weight: 500; padding: 4px 12px;
+    word-break: break-word;
+  }
+  .keyword-empty { color: var(--muted); font-size: 14px; margin: 12px 0; }
+
+  @media (max-width: 900px) {
+    .modal-body { grid-template-columns: 1fr; gap: 24px; }
+    .modal-aside { border-left: 0; border-top: 1px solid var(--border); padding: 16px 0 0; }
+    .entry { grid-template-columns: 64px minmax(0, 1fr); gap: 4px 12px; }
+    .entry .msg { grid-column: 2; }
+    .entry .tag { grid-column: 2; text-align: left; }
+  }
+  @media (max-width: 560px) {
+    .masthead { padding: 0 16px; gap: 8px; }
+    .wordmark { font-size: 14px; }
+    .status-group { gap: 8px; }
+    .status { font-size: 11px; max-width: 40vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .shell { padding: 0 16px 56px; }
+    .figures { grid-template-columns: 1fr; gap: 16px; }
+    .figure { padding: 0; border-left: 0; }
+    .controls { grid-template-columns: 1fr; }
+    .buttons button { flex: 1 1 100%; }
+    .toasts { top: auto; bottom: 16px; right: 16px; }
+    .modal { padding: 16px; }
+    .modal .buttons button { min-height: 44px; }
+    .modal-body { grid-template-columns: 1fr; gap: 16px; margin-top: 12px; }
+    .controls { grid-template-columns: 1fr 1fr; gap: 10px; }
+    .buttons { display: grid; grid-template-columns: 1fr 1fr; }
+    .buttons button { flex: none; }
+    .toggle-row, .hashtag-editor { margin-top: 12px; padding-top: 10px; }
+    .section-head { padding-bottom: 8px; }
+    .tag-rows { grid-template-columns: 1fr; max-height: 64px; }
+    .modal-aside > :nth-child(-n+6) { display: none; }
+    .record-list { max-height: 96px; }
+    .kv div { padding: 6px 0; }
+    .keyword-list, .keyword-empty { margin: 8px 0; }
+    .modal-aside .keyword-list { max-height: 80px; }
+    .keyword-list span { font-size: 14px; padding: 2px 8px; }
+    .section-head.subtle { margin-top: 12px; }
+    .kv div { font-size: 12px; }
+    .tag-hint, .aside-copy, .modal-note { display: none; }
+  }
+  @media (max-width: 480px) {
+    .masthead { padding: 0 12px; }
+    .wordmark { font-size: 13px; }
+    .status { max-width: 28vw; font-size: 10px; }
+    .settings-btn { padding: 0 10px; font-size: 13px; }
+    .shell { padding: 0 12px 48px; }
+    .intro { padding: 24px 0 20px; }
+    .eyebrow, .sub { font-size: 12px; }
+    .chip { min-height: 28px; padding: 0 12px; font-size: 13px; }
+    .figures { padding: 20px 0; }
+    .figure .value { font-size: 20px; }
+    .figure .foot, .figure .label { font-size: 11px; }
+    .workspace { padding-top: 24px; }
+    .section-head { gap: 8px; }
+    .head-actions { gap: 8px; }
+    .erase-all { padding: 0 8px; font-size: 11px; }
+    .entry { grid-template-columns: 56px minmax(0, 1fr); gap: 4px 8px; }
+    .entry .time, .entry .tag { font-size: 11px; }
+    .entry .user, .entry .msg { font-size: 13px; }
+    .buttons button { padding: 0 12px; font-size: 13px; }
+    .toasts { right: 12px; bottom: 12px; width: calc(100vw - 24px); }
+    .toast { padding: 12px; }
+    .toast .tuser { font-size: 18px; }
+    .modal-backdrop { padding: 12px; }
+    .modal { width: 100%; padding: 12px; max-height: calc(100vh - 24px); }
+    .modal-head h2 { font-size: 20px; }
+    .controls { gap: 10px; }
+    .tag-actions button { padding: 0 12px; font-size: 13px; }
+    .stat-figures { grid-template-columns: 1fr; gap: 16px; }
+    .stat-head { display: none; }
+    .stat-row { grid-template-columns: minmax(0, 1fr) 72px; gap: 4px 12px; }
+    .stat-row .num.total { grid-column: 2; grid-row: 1; text-align: right; }
+    .stat-row .terms { grid-column: 1 / -1; }
+  }
+</style>
+</head>
+<body>
+<header class="masthead">
+  <div class="wordmark"><span>Live</span> Comment Analyzer</div>
+  <div class="status-group">
+    <div class="status" id="status" data-state="idle"><span class="dot"></span><span id="statusText">Idle</span></div>
+    <button class="settings-btn" id="openSettings" aria-haspopup="dialog" aria-controls="settingsModal">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.11-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 8.89a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h.08a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.08a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1z"/></svg>
+      Settings
+    </button>
+  </div>
+</header>
+
+<div class="tabbar">
+  <div class="tabbar-inner">
+    <button class="tab active" type="button" data-view="home">Home</button>
+    <button class="tab" type="button" data-view="chat">General Chat</button>
+    <button class="tab" type="button" data-view="statistics">Statistics</button>
+  </div>
+</div>
+
+<main class="shell" id="homeView">
+  <section class="intro">
+    <p class="eyebrow">Live chat analysis</p>
+    <p class="sub">Hashtag and keyword mentions, in real time.</p>
+    <div class="chip-row" id="tagChips"></div>
+  </section>
+
+  <section class="now-monitoring" id="nowMonitoring" hidden>
+    <div class="now-head">
+      <span class="label">Now monitoring</span>
+      <span class="link-status" id="linkStatus" data-state="inactive">Inactive</span>
+    </div>
+    <div class="now-body">
+      <a id="videoLink">—</a>
+      <span class="now-channel" id="videoChannel"></span>
+    </div>
+  </section>
+
+  <div class="figures">
+    <div class="figure"><div class="label">Total mentions</div><div class="value brand" id="mentions">0</div><div class="foot">any casing</div></div>
+    <div class="figure"><div class="label">Unique users</div><div class="value" id="users">0</div><div class="foot">distinct usernames</div></div>
+    <div class="figure"><div class="label">Last detection</div><div class="value" id="latest">—</div><div class="foot" id="watching">No stream selected</div></div>
+  </div>
+
+  <div class="workspace">
+    <section class="ledger">
+      <div class="section-head"><h2>Live mentions</h2><small id="countLabel">0 records</small></div>
+      <div id="entries"><div class="empty">Waiting for live chat…</div></div>
+    </section>
+  </div>
+</main>
+
+<section class="shell" id="statisticsView" hidden>
+  <div class="stats-intro">
+    <p class="eyebrow">Mentions by user</p>
+    <p class="sub">Hashtags and keywords, grouped by username.</p>
+  </div>
+  <div class="stat-figures">
+    <div class="figure"><div class="label">Total mentions</div><div class="value brand" id="statMentions">0</div><div class="foot">all matched terms</div></div>
+    <div class="figure"><div class="label">Unique users</div><div class="value" id="statUsers">0</div><div class="foot">distinct usernames</div></div>
+    <div class="figure"><div class="label">Terms matched</div><div class="value" id="statTerms">0</div><div class="foot">tracked terms</div></div>
+  </div>
+  <div class="stats-body">
+    <div class="section-head"><h2>Terms</h2><small>unique users</small></div>
+    <div class="term-cards" id="termCards"></div>
+    <div class="stat-head table-head">
+      <span>Username</span><span>Hashtags</span><span>Keywords</span><span>Total</span>
+    </div>
+    <div id="statRows"><div class="stat-empty">No records</div></div>
+  </div>
+</section>
+
+<section class="shell" id="chatView" hidden>
+  <div class="stats-intro">
+    <p class="eyebrow">Live chat</p>
+    <p class="sub">All public messages from the active stream.</p>
+  </div>
+  <div class="section-head">
+    <h2>General Chat</h2>
+    <div class="chat-tools">
+      <input id="chatSearch" type="search" placeholder="Search chat" autocomplete="off" spellcheck="false">
+      <button class="live-toggle" id="chatLive" type="button" data-state="live">Live</button>
+      <small id="chatCount">0 messages</small>
+    </div>
+  </div>
+  <div class="chat-list" id="chatList"><div class="chat-empty">Waiting for live chat…</div></div>
+</section>
+
+<div class="modal-backdrop" id="settingsModal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+    <div class="modal-head">
+      <div>
+        <p class="eyebrow">Connection</p>
+        <h2 id="settingsTitle">Settings</h2>
+      </div>
+      <button class="icon-btn" id="closeSettings" aria-label="Close settings">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-main">
+        <div class="controls">
+          <div class="field stream">
+            <label for="url">YouTube stream URL or video ID</label>
+            <input id="url" placeholder="https://www.youtube.com/watch?v=…" autocomplete="off" spellcheck="false">
+          </div>
+          <div class="field source">
+            <label for="source">Source</label>
+            <select id="source">
+              <option value="auto">Auto (no key needed)</option>
+              <option value="innertube">Public chat</option>
+              <option value="youtube">Data API v3</option>
+            </select>
+          </div>
+          <div class="field key">
+            <label for="key">API key (optional)</label>
+            <input id="key" type="password" placeholder="AIza…" autocomplete="off" spellcheck="false">
+          </div>
+          <div class="buttons">
+            <button class="primary" id="start">Start monitoring</button>
+            <button id="stop">Stop</button>
+          </div>
+          <div class="toggle-row">
+            <div class="toggle-copy">
+              <div class="toggle-title">Toast notifications</div>
+              <div class="toggle-sub">Pop up each username as it is detected.</div>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="toastToggle" aria-label="Toast notifications" checked>
+              <span class="track"></span>
+            </label>
+          </div>
+          <div class="hashtag-editor">
+            <div class="section-head"><h2>Hashtags</h2><small>case-insensitive</small></div>
+            <div class="tag-rows" id="tagRows"></div>
+            <div class="tag-actions">
+              <input id="newTag" placeholder="New hashtag" aria-label="New hashtag" spellcheck="false">
+              <button id="addTag" type="button">+ Add</button>
+              <button class="primary small" id="saveTags" type="button">Save hashtags</button>
+            </div>
+            <p class="tag-hint">Full comments, in any casing.</p>
+          </div>
+          <div class="hashtag-editor">
+            <div class="section-head"><h2>Keywords</h2><small>case-insensitive</small></div>
+            <div class="tag-rows" id="keywordRows"></div>
+            <div class="tag-actions">
+              <input id="newKeyword" placeholder="New keyword" aria-label="New keyword" spellcheck="false">
+              <button id="addKeyword" type="button">+ Add</button>
+              <button class="primary small" id="saveKeywords" type="button">Save keywords</button>
+            </div>
+            <p class="tag-hint">Whole words and phrases.</p>
+          </div>
+        </div>
+        <p class="modal-note">Public chat needs no key. Data API v3 requires an API key.</p>
+        <p class="modal-note">Developed by Cluncles</p>
+      </div>
+      <div class="modal-aside">
+        <div class="section-head"><h2>Watching for</h2><small>case-insensitive</small></div>
+        <div class="keyword-list" id="tagDisplay"></div>
+        <div class="section-head subtle"><h2>Keywords</h2><small>case-insensitive</small></div>
+        <div class="keyword-list" id="keywordDisplay"></div>
+        <p class="aside-copy">Matches appear as pop-ups and are logged with the username and full comment.</p>
+        <div class="kv">
+          <div><span>Connection</span><span id="kvConnection">Idle</span></div>
+          <div><span>Source</span><span id="kvSource">—</span></div>
+          <div><span>Video ID</span><span id="kvVideo">—</span></div>
+        </div>
+        <div class="links">
+          <a href="/api/export.csv" download>Export CSV</a>
+          <a href="/api/export.jsonl" download>Export JSONL</a>
+          <a href="/api/state">State JSON</a>
+        </div>
+        <div class="section-head subtle"><h2>Records</h2><small id="settingsCount">0 records</small></div>
+        <div class="records-actions">
+          <button class="erase-all" id="eraseAll" type="button">Erase all</button>
+          <span class="record-hint">Stops monitoring</span>
+        </div>
+        <div class="record-list" id="recordList"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toasts" id="toasts" aria-live="polite" aria-atomic="false"></div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const state = {
+    history: [], chat: [], hashtags: [], keywords: [], filter: null,
+    aggregates: null, chatQuery: "", chatPaused: false, chatNewId: null,
+  };
+  const filteredHistory = () => state.filter
+    ? state.history.filter((m) => (m.variant || "").toLowerCase() === state.filter)
+    : state.history;
+
+  function renderLedger() {
+    const rows = filteredHistory();
+    const list = $("entries");
+    list.innerHTML = "";
+    if (!rows.length) {
+      list.innerHTML = '<div class="empty">Waiting for live chat…</div>';
+    } else {
+      rows.forEach((m) => list.appendChild(makeEntry(m)));
+    }
+    $("countLabel").textContent = rows.length + " records";
+  }
+
+  $("tagChips").addEventListener("click", (e) => {
+    const chip = e.target.closest(".chip");
+    if (!chip) return;
+    state.filter = chip.dataset.filter || null;
+    renderTagChips();
+    renderLedger();
+    renderStats();
+  });
+
+  const modal = $("settingsModal");
+  const openSettings = () => {
+    modal.hidden = false;
+    document.body.style.overflow = "hidden";
+    setTimeout(() => $("url").focus(), 30);
+  };
+  const closeSettings = () => {
+    if (modal.hidden) return;
+    modal.hidden = true;
+    document.body.style.overflow = "";
+    $("openSettings").focus();
+  };
+  $("openSettings").addEventListener("click", openSettings);
+  $("closeSettings").addEventListener("click", closeSettings);
+  modal.addEventListener("click", (e) => { if (e.target === modal) closeSettings(); });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !modal.hidden) closeSettings();
+  });
+  document.querySelectorAll(".tab").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t === tab));
+      $("homeView").hidden = tab.dataset.view !== "home";
+      $("chatView").hidden = tab.dataset.view !== "chat";
+      $("statisticsView").hidden = tab.dataset.view !== "statistics";
+      $("toasts").hidden = tab.dataset.view !== "home";
+      if (tab.dataset.view === "chat") renderChat();
+    });
+  });
+  const toastToggle = $("toastToggle");
+  try { toastToggle.checked = localStorage.getItem("palawan_toasts") !== "off"; } catch (e) {}
+  toastToggle.addEventListener("change", () => {
+    try { localStorage.setItem("palawan_toasts", toastToggle.checked ? "on" : "off"); } catch (e) {}
+  });
+  const normaliseTag = (value) => String(value || "").trim()
+    .replace(/^#+/, "").trim().toLowerCase().replace(/[^\w\u0080-\uffff]/g, "");
+  const escapeRe = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const matchPattern = () => {
+    const parts = [];
+    const tags = state.hashtags.slice().sort((a, b) => b.length - a.length);
+    const words = state.keywords.slice().sort((a, b) => b.length - a.length);
+    if (tags.length) {
+      parts.push("(?<![\\w])#(?:" + tags.map(escapeRe).join("|") + ")\\b");
+    }
+    if (words.length) {
+      parts.push("(?<![#\\w])(?:" + words.map(escapeRe).join("|") + ")\\b");
+    }
+    return parts.length ? new RegExp(parts.join("|"), "gi") : null;
+  };
+
+  function renderTagChips() {
+    const box = $("tagChips");
+    box.innerHTML = "";
+    const items = [["All", null],
+      ...state.hashtags.map((tag) => ["#" + tag, "#" + tag.toLowerCase()]),
+      ...state.keywords.map((word) => [word, word.toLowerCase()])];
+    items.forEach(([label, key]) => {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "chip" + (key && !key.startsWith("#") ? " keyword" : "");
+      chip.textContent = label;
+      chip.dataset.filter = key || "";
+      chip.setAttribute("aria-pressed", String(state.filter === key));
+      box.appendChild(chip);
+    });
+  }
+
+  function renderTagDisplay() {
+    const box = $("tagDisplay");
+    box.innerHTML = "";
+    if (!state.hashtags.length) {
+      const empty = document.createElement("div");
+      empty.className = "keyword-empty";
+      empty.textContent = "No hashtags configured";
+      box.appendChild(empty);
+      return;
+    }
+    state.hashtags.forEach((tag) => {
+      const span = document.createElement("span");
+      span.textContent = "#" + tag;
+      box.appendChild(span);
+    });
+  }
+
+  function renderTagInputs() {
+    const rows = $("tagRows");
+    rows.innerHTML = "";
+    if (!state.hashtags.length) {
+      const empty = document.createElement("div");
+      empty.className = "empty";
+      empty.style.padding = "0";
+      empty.textContent = "No hashtags yet — add one below.";
+      rows.appendChild(empty);
+      return;
+    }
+    state.hashtags.forEach((tag, index) => {
+      const row = document.createElement("div");
+      row.className = "tag-row";
+      const input = document.createElement("input");
+      input.type = "text";
+      input.value = "#" + tag;
+      input.setAttribute("aria-label", "Hashtag " + (index + 1));
+      input.dataset.tagIndex = String(index);
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "tag-remove";
+      remove.textContent = "×";
+      remove.setAttribute("aria-label", "Remove #" + tag);
+      remove.addEventListener("click", () => {
+        state.hashtags.splice(index, 1);
+        renderTagInputs();
+      });
+      row.append(input, remove);
+      rows.appendChild(row);
+    });
+  }
+
+  function setHashtags(tags) {
+    state.hashtags = [...new Set(
+      (Array.isArray(tags) ? tags : []).map(normaliseTag).filter(Boolean)
+    )];
+    renderTagChips();
+    renderTagDisplay();
+    renderTagInputs();
+    renderStats();
+  }
+
+  async function saveHashtags() {
+    const inputs = [...document.querySelectorAll("#tagRows input[data-tag-index]")];
+    setHashtags(inputs.map((input) => input.value));
+    const extra = normaliseTag($("newTag").value);
+    if (extra && !state.hashtags.includes(extra)) {
+      state.hashtags.push(extra);
+      renderTagInputs();
+    }
+    try {
+      const data = await post("/api/hashtags", { hashtags: state.hashtags });
+      setHashtags(data.hashtags);
+      $("newTag").value = "";
+      const button = $("saveTags");
+      const original = "Save hashtags";
+      button.textContent = "Saved";
+      setTimeout(() => { button.textContent = original; }, 1400);
+    } catch (err) { setStatus("error", err.message); }
+  }
+
+  $("addTag").addEventListener("click", () => {
+    const tag = normaliseTag($("newTag").value);
+    if (!tag) return;
+    if (!state.hashtags.includes(tag)) state.hashtags.push(tag);
+    $("newTag").value = "";
+    renderTagInputs();
+  });
+  $("newTag").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); $("addTag").click(); }
+  });
+  $("saveTags").addEventListener("click", saveHashtags);
+  setHashtags([]);
+
+  const normaliseKeyword = (value) => String(value || "").trim()
+    .replace(/^#+/, "").trim().toLowerCase().replace(/\s+/g, " ")
+    .replace(/[^\w\u0080-\uffff .-]/g, "").trim();
+
+  function renderKeywordDisplay() {
+    const box = $("keywordDisplay");
+    box.innerHTML = "";
+    if (!state.keywords.length) {
+      const empty = document.createElement("div");
+      empty.className = "keyword-empty";
+      empty.textContent = "No keywords configured";
+      box.appendChild(empty);
+      return;
+    }
+    state.keywords.forEach((word) => {
+      const span = document.createElement("span");
+      span.textContent = word;
+      box.appendChild(span);
+    });
+  }
+
+  function renderKeywordInputs() {
+    const rows = $("keywordRows");
+    rows.innerHTML = "";
+    if (!state.keywords.length) {
+      const empty = document.createElement("div");
+      empty.className = "empty";
+      empty.style.padding = "0";
+      empty.textContent = "No keywords yet — add one below.";
+      rows.appendChild(empty);
+      return;
+    }
+    state.keywords.forEach((word, index) => {
+      const row = document.createElement("div");
+      row.className = "tag-row";
+      const input = document.createElement("input");
+      input.type = "text";
+      input.value = word;
+      input.setAttribute("aria-label", "Keyword " + (index + 1));
+      input.dataset.keywordIndex = String(index);
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "tag-remove";
+      remove.textContent = "×";
+      remove.setAttribute("aria-label", "Remove " + word);
+      remove.addEventListener("click", () => {
+        state.keywords.splice(index, 1);
+        renderKeywordInputs();
+      });
+      row.append(input, remove);
+      rows.appendChild(row);
+    });
+  }
+
+  function setKeywords(words) {
+    state.keywords = [...new Set(
+      (Array.isArray(words) ? words : []).map(normaliseKeyword).filter(Boolean)
+    )];
+    renderTagChips();
+    renderKeywordDisplay();
+    renderKeywordInputs();
+    renderStats();
+  }
+
+  async function saveKeywords() {
+    const inputs = [...document.querySelectorAll("#keywordRows input[data-keyword-index]")];
+    setKeywords(inputs.map((input) => input.value));
+    const extra = normaliseKeyword($("newKeyword").value);
+    if (extra && !state.keywords.includes(extra)) {
+      state.keywords.push(extra);
+      renderKeywordInputs();
+    }
+    try {
+      const data = await post("/api/keywords", { keywords: state.keywords });
+      setKeywords(data.keywords);
+      $("newKeyword").value = "";
+      const button = $("saveKeywords");
+      button.textContent = "Saved";
+      setTimeout(() => { button.textContent = "Save keywords"; }, 1400);
+    } catch (err) { setStatus("error", err.message); }
+  }
+
+  $("addKeyword").addEventListener("click", () => {
+    const word = normaliseKeyword($("newKeyword").value);
+    if (!word) return;
+    if (!state.keywords.includes(word)) state.keywords.push(word);
+    $("newKeyword").value = "";
+    renderKeywordInputs();
+  });
+  $("newKeyword").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); $("addKeyword").click(); }
+  });
+  $("saveKeywords").addEventListener("click", saveKeywords);
+  setKeywords([]);
+  renderStats();
+
+  const phTime = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Manila", hour: "2-digit", minute: "2-digit",
+    second: "2-digit", hour12: false, hourCycle: "h23",
+  });
+  const escapeTime = (ts) => {
+    const d = new Date(ts);
+    return Number.isNaN(d.getTime()) ? "—" : phTime.format(d) + " PHT";
+  };
+  function renderChat() {
+    const box = $("chatList");
+    const entering = state.chatNewId;
+    state.chatNewId = null;
+    const previousScroll = box.scrollTop;
+    const query = state.chatQuery.trim().toLowerCase();
+    const rows = query ? state.chat.filter((m) =>
+      (m.user || "").toLowerCase().includes(query) ||
+      (m.message || "").toLowerCase().includes(query)
+    ) : state.chat;
+    box.innerHTML = "";
+    if (!rows.length) {
+      box.innerHTML = query
+        ? '<div class="chat-empty">No matching messages</div>'
+        : '<div class="chat-empty">Waiting for live chat…</div>';
+      $("chatCount").textContent = "0 messages";
+      return;
+    }
+    rows.forEach((m) => {
+      const row = document.createElement("div");
+      row.className = "chat-item";
+      if (m.id === entering) row.classList.add("chat-enter");
+      const who = document.createElement("div"); who.className = "who"; who.textContent = m.user || "unknown";
+      const msg = document.createElement("div"); msg.className = "msg"; msg.appendChild(highlight(m.message || ""));
+      const time = document.createElement("div"); time.className = "time mono"; time.textContent = escapeTime(m.ts);
+      row.append(who, msg, time);
+      box.appendChild(row);
+    });
+    const suffix = rows.length === 1 ? " message" : " messages";
+    $("chatCount").textContent = query
+      ? rows.length + " of " + state.chat.length + suffix
+      : rows.length + suffix;
+    if (state.chatPaused) box.scrollTop = previousScroll;
+    else if (query) box.scrollTop = 0;
+    else box.scrollTop = box.scrollHeight;
+  }
+
+  $("chatSearch").addEventListener("input", () => {
+    state.chatQuery = $("chatSearch").value;
+    renderChat();
+  });
+  $("chatLive").addEventListener("click", () => {
+    state.chatPaused = !state.chatPaused;
+    const button = $("chatLive");
+    button.textContent = state.chatPaused ? "Paused" : "Live";
+    button.dataset.state = state.chatPaused ? "paused" : "live";
+    if (!state.chatPaused) $("chatList").scrollTop = $("chatList").scrollHeight;
+  });
+
+  function addChat(m) {
+    if (!m || state.chat.some((item) => item.id === m.id)) return;
+    state.chat.push(m);
+    if (state.chat.length > 300) state.chat.shift();
+    state.chatNewId = m.id;
+    renderChat();
+  }
+
+  const highlight = (text) => {
+    const frag = document.createDocumentFragment();
+    const re = matchPattern();
+    if (!re) { frag.appendChild(document.createTextNode(text || "")); return frag; }
+    let last = 0, m;
+    while ((m = re.exec(text || "")) !== null) {
+      frag.appendChild(document.createTextNode(text.slice(last, m.index)));
+      const b = document.createElement("b");
+      b.textContent = m[0];
+      frag.appendChild(b);
+      last = m.index + m[0].length;
+    }
+    frag.appendChild(document.createTextNode((text || "").slice(last)));
+    return frag;
+  };
+
+  function setVideo(info) {
+    const box = $("nowMonitoring");
+    if (!info) { box.hidden = true; return; }
+    box.hidden = false;
+    const link = $("videoLink");
+    link.textContent = info.title || $("kvVideo").textContent || "—";
+    if (info.url) link.href = info.url;
+    else link.removeAttribute("href");
+    $("videoChannel").textContent = info.channel || "";
+    const status = info.status === "active" ? "Active" : "Inactive";
+    $("linkStatus").textContent = status;
+    $("linkStatus").setAttribute("data-state", info.status || "inactive");
+  }
+
+  function setStatus(kind, message) {
+    $("status").setAttribute("data-state", kind);
+    $("statusText").textContent = message;
+    $("kvConnection").textContent = message;
+  }
+
+  function updateStats(data) {
+    if (typeof data.mentions === "number") $("mentions").textContent = data.mentions;
+    if (typeof data.users === "number") $("users").textContent = data.users;
+    if (data.latest) $("latest").textContent = escapeTime(data.latest).slice(0, 8);
+    if (data.aggregates) {
+      state.aggregates = data.aggregates;
+      renderStats();
+    }
+  }
+
+  function makeEntry(m) {
+    const row = document.createElement("div");
+    row.className = "entry";
+    const time = document.createElement("span"); time.className = "time mono"; time.textContent = escapeTime(m.ts).slice(0, 8);
+    const user = document.createElement("span"); user.className = "user"; user.textContent = m.user;
+    const msg = document.createElement("span"); msg.className = "msg"; msg.appendChild(highlight(m.message));
+    const tag = document.createElement("span"); tag.className = "tag mono"; tag.textContent = m.variant;
+    row.append(time, user, msg, tag);
+    return row;
+  }
+
+  function addMatch(m, popup = true) {
+    state.history = [m, ...state.history.filter((x) => x.id !== m.id)].slice(0, 300);
+    renderLedger();
+    renderRecordList();
+    if (popup) showToast(m);
+  }
+
+  function renderStats() {
+    const agg = state.aggregates || { mentions: 0, users: 0, terms: [], by_user: [] };
+    const found = new Map(agg.terms.map((t) => [t.term, t]));
+    const cardTerms = new Map();
+    [...state.hashtags.map((tag) => "#" + tag.toLowerCase()),
+     ...state.keywords.map((word) => word.toLowerCase())].forEach((key) => {
+      if (state.filter && key !== state.filter) return;
+      const term = found.get(key);
+      cardTerms.set(key, {
+        userCount: term ? term.users : 0,
+        count: term ? term.mentions : 0,
+      });
+    });
+    $("statMentions").textContent = state.filter
+      ? [...cardTerms.values()].reduce((sum, d) => sum + d.count, 0)
+      : agg.mentions;
+    $("statUsers").textContent = agg.users;
+    $("statTerms").textContent = state.filter ? cardTerms.size : found.size;
+
+    const cardBox = $("termCards");
+    cardBox.innerHTML = "";
+    if (!cardTerms.size) {
+      cardBox.innerHTML = '<div class="stat-empty">No terms configured</div>';
+    }
+    [...cardTerms.entries()]
+      .sort((a, b) => b[1].userCount - a[1].userCount)
+      .forEach(([term, data]) => {
+        const card = document.createElement("div");
+        card.className = "term-card";
+        card.dataset.kind = term.startsWith("#") ? "hashtag" : "keyword";
+        const label = document.createElement("div");
+        label.className = "term-label";
+        label.textContent = "Total of users mentioned";
+        const name = document.createElement("div");
+        name.className = "term-name";
+        name.textContent = term;
+        const value = document.createElement("div");
+        value.className = "term-value";
+        value.textContent = data.userCount;
+        const sub = document.createElement("div");
+        sub.className = "term-sub";
+        sub.textContent = data.count + " mentions · " +
+          (card.dataset.kind === "hashtag" ? "Hashtag" : "Keyword");
+        card.append(label, name, value, sub);
+        cardBox.appendChild(card);
+      });
+
+    const box = $("statRows");
+    box.innerHTML = "";
+    const users = agg.by_user.map((u) => {
+      const terms = state.filter ? u.terms.filter(([t]) => t === state.filter) : u.terms;
+      const hash = state.filter
+        ? (state.filter.startsWith("#") ? terms.reduce((n, [, c]) => n + c, 0) : 0)
+        : u.hashtags;
+      const kw = state.filter
+        ? (state.filter.startsWith("#") ? 0 : terms.reduce((n, [, c]) => n + c, 0))
+        : u.keywords;
+      return { user: u.user, hash, kw, total: hash + kw, terms };
+    }).filter((u) => !state.filter || u.total > 0);
+    if (!users.length) {
+      box.innerHTML = '<div class="stat-empty">No records</div>';
+      return;
+    }
+    users.forEach((data) => {
+      const row = document.createElement("div");
+      row.className = "stat-row";
+      const who = document.createElement("span"); who.className = "who"; who.textContent = data.user;
+      const hash = document.createElement("span"); hash.className = "num hash mono"; hash.textContent = data.hash;
+      const kw = document.createElement("span"); kw.className = "num kw mono"; kw.textContent = data.kw;
+      const total = document.createElement("span"); total.className = "num total mono";
+      total.textContent = data.total;
+      const detail = document.createElement("span"); detail.className = "terms";
+      detail.textContent = data.terms.map(([term, count]) => term + " × " + count).join("  ·  ");
+      row.append(who, hash, kw, total, detail);
+      box.appendChild(row);
+    });
+  }
+
+  function renderRecordList() {
+    const box = $("recordList");
+    box.innerHTML = "";
+    if (!state.history.length) {
+      const empty = document.createElement("div");
+      empty.className = "record-empty";
+      empty.textContent = "No records";
+      box.appendChild(empty);
+    }
+    state.history.slice(0, 50).forEach((m) => {
+      const row = document.createElement("div");
+      row.className = "record-row";
+      row.dataset.id = m.id;
+      const who = document.createElement("span"); who.className = "who"; who.textContent = m.user;
+      const what = document.createElement("span"); what.className = "what"; what.textContent = m.variant;
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "record-delete";
+      remove.textContent = "×";
+      remove.setAttribute("aria-label", "Delete record");
+      remove.addEventListener("click", () => deleteRecord(m.id));
+      row.append(who, what, remove);
+      box.appendChild(row);
+    });
+    $("settingsCount").textContent = state.history.length + " records";
+    renderStats();
+  }
+
+  function removeRecord(id) {
+    state.history = state.history.filter((m) => m.id !== id);
+    document.querySelectorAll('[data-id="' + id + '"]').forEach((el) => el.remove());
+    $("settingsCount").textContent = state.history.length + " records";
+    renderLedger();
+    renderRecordList();
+    renderStats();
+  }
+
+  function clearLedger() {
+    state.history = [];
+    renderLedger();
+    renderRecordList();
+  }
+
+  async function deleteRecord(id) {
+    try {
+      const res = await fetch("/api/mentions/" + encodeURIComponent(id), {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error("Delete failed");
+      removeRecord(id);
+    } catch (err) { setStatus("error", err.message); }
+  }
+
+  async function eraseAll() {
+    if (!window.confirm("Erase all records?")) return;
+    try {
+      await post("/api/stop", {});
+      const res = await fetch("/api/mentions", {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error("Erase failed");
+      clearLedger();
+    } catch (err) { setStatus("error", err.message); }
+  }
+  $("eraseAll").addEventListener("click", eraseAll);
+
+  function showToast(m) {
+    if (!toastToggle.checked) return;
+    const wrap = $("toasts");
+    const toast = document.createElement("div");
+    toast.className = "toast";
+    const label = document.createElement("div"); label.className = "tlabel"; label.textContent = "New " + (m.variant || "") + " mention";
+    const user = document.createElement("div"); user.className = "tuser"; user.textContent = m.user;
+    const msg = document.createElement("div"); msg.className = "tmsg"; msg.appendChild(highlight(m.message));
+    const meta = document.createElement("div"); meta.className = "tmeta mono"; meta.textContent = escapeTime(m.ts) + "  ·  " + m.variant;
+    toast.append(label, user, msg, meta);
+    wrap.prepend(toast);
+    while (wrap.children.length > 4) wrap.lastChild.remove();
+    const remove = () => { toast.classList.add("leaving"); setTimeout(() => toast.remove(), 350); };
+    setTimeout(remove, 9000);
+  }
+
+  async function post(path, body) {
+    const res = await fetch(path, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: body === undefined ? "{}" : JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Request failed");
+    return data;
+  }
+
+  $("start").addEventListener("click", async () => {
+    try {
+      const data = await post("/api/start", {
+        url: $("url").value, source: $("source").value, api_key: $("key").value,
+      });
+      $("kvVideo").textContent = data.video_id;
+      $("kvSource").textContent = data.source;
+      $("watching").textContent = data.video_id;
+      setVideo(data.video);
+      closeSettings();
+    } catch (err) { setStatus("error", err.message); }
+  });
+  $("stop").addEventListener("click", async () => {
+    await post("/api/stop");
+    setStatus("idle", "Stopped");
+  });
+
+  fetch("/api/state").then((r) => r.json()).then((data) => {
+    updateStats(data);
+    setHashtags(data.hashtags);
+    setKeywords(data.keywords);
+    setVideo(data.video);
+    state.history = data.history || [];
+    state.chat = data.chat || [];
+    renderLedger();
+    renderChat();
+    renderRecordList();
+    if (data.video_id) {
+      $("kvVideo").textContent = data.video_id;
+      $("kvSource").textContent = data.source || "—";
+      $("watching").textContent = data.video_id;
+      setStatus("live", "Connected");
+    }
+  }).catch(() => setStatus("error", "State unavailable"));
+
+  const events = new EventSource("/api/events");
+  events.addEventListener("chat", (e) => addChat(JSON.parse(e.data)));
+  events.addEventListener("match", (e) => addMatch(JSON.parse(e.data)));
+  events.addEventListener("stats", (e) => updateStats(JSON.parse(e.data)));
+  events.addEventListener("deleted", (e) => removeRecord(JSON.parse(e.data).id));
+  events.addEventListener("cleared", () => clearLedger());
+  events.addEventListener("hashtags", (e) => setHashtags(JSON.parse(e.data).hashtags));
+  events.addEventListener("keywords", (e) => setKeywords(JSON.parse(e.data).keywords));
+  events.addEventListener("video", (e) => setVideo(JSON.parse(e.data)));
+  events.addEventListener("status", (e) => {
+    const s = JSON.parse(e.data);
+    setStatus(s.state, s.message || s.state);
+    if (s.video_id) {
+      $("kvVideo").textContent = s.video_id;
+      $("kvSource").textContent = s.source || "—";
+      $("watching").textContent = s.video_id;
+    }
+  });
+  events.onerror = () => setStatus("reconnecting", "Reconnecting…");
+})();
+</script>
+</body>
+</html>
